@@ -7,33 +7,66 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableMap;
-import com.facebook.react.bridge.ReadableArray;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.UUID;
-import java.util.HashSet;
-import java.util.Set;
-import java.nio.charset.Charset;
 
+import com.itextpdf.text.BadElementException;
 import com.itextpdf.text.Document;
+import com.itextpdf.text.DocumentException;
+import com.itextpdf.text.Image;
 import com.itextpdf.text.pdf.PdfWriter;
 import com.itextpdf.text.pdf.codec.Base64;
+import com.itextpdf.tool.xml.XMLWorker;
 import com.itextpdf.tool.xml.XMLWorkerHelper;
-import com.itextpdf.text.FontFactory;
-import com.itextpdf.tool.xml.XMLWorkerFontProvider;
+import com.itextpdf.tool.xml.html.Tags;
+import com.itextpdf.tool.xml.parser.XMLParser;
+import com.itextpdf.tool.xml.pipeline.css.CSSResolver;
+import com.itextpdf.tool.xml.pipeline.css.CssResolverPipeline;
+import com.itextpdf.tool.xml.pipeline.end.PdfWriterPipeline;
+import com.itextpdf.tool.xml.pipeline.html.AbstractImageProvider;
+import com.itextpdf.tool.xml.pipeline.html.HtmlPipeline;
+import com.itextpdf.tool.xml.pipeline.html.HtmlPipelineContext;
+ 
 
 import android.os.Environment;
 
 public class RNHTMLtoPDFModule extends ReactContextBaseJavaModule {
 
+//custom internal class
+class Base64ImageProvider extends AbstractImageProvider {
+ 
+        @Override
+        public Image retrieve(String src) {
+            int pos = src.indexOf("base64,");
+            try {
+                if (src.startsWith("data") && pos > 0) {
+                    byte[] img = Base64.decode(src.substring(pos + 7));
+                    return Image.getInstance(img);
+                }
+                else {
+                    return Image.getInstance(src);
+                }
+            } catch (BadElementException ex) {
+                return null;
+            } catch (IOException ex) {
+                return null;
+            }
+        }
+ 
+        @Override
+        public String getImageRootPath() {
+            return null;
+        }
+    }
+
+
   private Promise promise;
   private final ReactApplicationContext mReactContext;
-  private Set<String> customFonts = new HashSet<>();
-
-  XMLWorkerFontProvider fontProvider = new XMLWorkerFontProvider(XMLWorkerFontProvider.DONTLOOKFORFONTS);
 
   public RNHTMLtoPDFModule(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -57,15 +90,6 @@ public class RNHTMLtoPDFModule extends ReactContextBaseJavaModule {
         fileName = options.getString("fileName");
       } else {
         fileName = UUID.randomUUID().toString();
-      }
-
-      if (options.hasKey("fonts")) {
-        if (options.getArray("fonts") != null) {
-          final ReadableArray fonts = options.getArray("fonts");
-          for (int i = 0; i < fonts.size(); i++) {
-            customFonts.add(fonts.getString(i));
-          }
-        }
       }
 
       if (options.hasKey("directory") && options.getString("directory").equals("docs")) {
@@ -96,19 +120,39 @@ public class RNHTMLtoPDFModule extends ReactContextBaseJavaModule {
   private String convertToPDF(String htmlString, File file) throws Exception {
     try {
       Document doc = new Document();
-      InputStream in = new ByteArrayInputStream(htmlString.getBytes());
+      //InputStream in = new ByteArrayInputStream(htmlString.getBytes());
 
-      PdfWriter pdf = PdfWriter.getInstance(doc, new FileOutputStream(file));
-
-      FontFactory.setFontImp(fontProvider);
-      for (String font : customFonts) {
-        fontProvider.register( font );
-      }
+      PdfWriter writer = PdfWriter.getInstance(doc, new FileOutputStream(file));
 
       doc.open();
-      XMLWorkerHelper.getInstance().parseXHtml(pdf, doc, in, null, Charset.forName("UTF-8"), fontProvider);
+      //XMLWorkerHelper.getInstance().parseXHtml(pdf, doc,in);
+      
+      // CSS
+        CSSResolver cssResolver =
+                XMLWorkerHelper.getInstance().getDefaultCssResolver(true);
+
+
+
+      // HTML
+        HtmlPipelineContext htmlContext = new HtmlPipelineContext(null);
+        htmlContext.setTagFactory(Tags.getHtmlTagProcessorFactory());
+        htmlContext.setImageProvider(new Base64ImageProvider());
+ 
+        // Pipelines
+        PdfWriterPipeline pdf = new PdfWriterPipeline(doc, writer);
+        HtmlPipeline html = new HtmlPipeline(htmlContext, pdf);
+        CssResolverPipeline css = new CssResolverPipeline(cssResolver, html);
+ 
+        // XML Worker
+        XMLWorker worker = new XMLWorker(css, true);
+        XMLParser p = new XMLParser(worker);
+        p.parse(new ByteArrayInputStream(htmlString.getBytes()));
+ 
+        // step 5
+        //document.close();
+ 
+      
       doc.close();
-      in.close();
 
       String absolutePath = file.getAbsolutePath();
 
@@ -131,3 +175,5 @@ public class RNHTMLtoPDFModule extends ReactContextBaseJavaModule {
   }
 
 }
+
+
