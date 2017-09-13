@@ -4,6 +4,7 @@ import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.WritableMap;
@@ -13,16 +14,22 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 import com.itextpdf.text.BadElementException;
 import com.itextpdf.text.Document;
 import com.itextpdf.text.DocumentException;
+import com.itextpdf.text.FontFactory;
 import com.itextpdf.text.Image;
 import com.itextpdf.text.pdf.PdfWriter;
 import com.itextpdf.text.pdf.codec.Base64;
 import com.itextpdf.tool.xml.XMLWorker;
+import com.itextpdf.tool.xml.XMLWorkerFontProvider;
 import com.itextpdf.tool.xml.XMLWorkerHelper;
+import com.itextpdf.tool.xml.html.CssAppliersImpl;
+import com.itextpdf.tool.xml.html.CssAppliers;
 import com.itextpdf.tool.xml.html.Tags;
 import com.itextpdf.tool.xml.parser.XMLParser;
 import com.itextpdf.tool.xml.pipeline.css.CSSResolver;
@@ -67,6 +74,9 @@ class Base64ImageProvider extends AbstractImageProvider {
 
   private Promise promise;
   private final ReactApplicationContext mReactContext;
+  private Set<String> customFonts = new HashSet<>();
+
+  XMLWorkerFontProvider fontProvider = new XMLWorkerFontProvider(XMLWorkerFontProvider.DONTLOOKFORFONTS);
 
   public RNHTMLtoPDFModule(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -90,6 +100,15 @@ class Base64ImageProvider extends AbstractImageProvider {
         fileName = options.getString("fileName");
       } else {
         fileName = UUID.randomUUID().toString();
+      }
+
+      if (options.hasKey("fonts")) {
+        if (options.getArray("fonts") != null) {
+          final ReadableArray fonts = options.getArray("fonts");
+          for (int i = 0; i < fonts.size(); i++) {
+            customFonts.add(fonts.getString(i));
+          }
+        }
       }
 
       if (options.hasKey("directory") && options.getString("directory").equals("docs")) {
@@ -124,6 +143,11 @@ class Base64ImageProvider extends AbstractImageProvider {
 
       PdfWriter writer = PdfWriter.getInstance(doc, new FileOutputStream(file));
 
+      FontFactory.setFontImp(fontProvider);
+      for (String font : customFonts) {
+        fontProvider.register( font );
+      }
+
       doc.open();
       //XMLWorkerHelper.getInstance().parseXHtml(pdf, doc,in);
       
@@ -131,10 +155,11 @@ class Base64ImageProvider extends AbstractImageProvider {
         CSSResolver cssResolver =
                 XMLWorkerHelper.getInstance().getDefaultCssResolver(true);
 
-
+        
+        CssAppliers cssAppliers = new CssAppliersImpl(fontProvider);
 
       // HTML
-        HtmlPipelineContext htmlContext = new HtmlPipelineContext(null);
+        HtmlPipelineContext htmlContext = new HtmlPipelineContext(cssAppliers);
         htmlContext.setTagFactory(Tags.getHtmlTagProcessorFactory());
         htmlContext.setImageProvider(new Base64ImageProvider());
  
